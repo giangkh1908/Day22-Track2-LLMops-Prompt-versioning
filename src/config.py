@@ -21,6 +21,8 @@ os.environ["LANGCHAIN_ENDPOINT"]   = os.getenv("LANGCHAIN_ENDPOINT", "https://ap
 # ── Provider mặc định ─────────────────────────────────────────────────────
 # Đổi giá trị PROVIDER trong .env: openai | gemini | anthropic | ollama | openrouter
 PROVIDER = os.getenv("PROVIDER", "openai").lower()
+DEFAULT_EMBEDDING_PROVIDER = "local" if PROVIDER == "openrouter" else PROVIDER
+EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", DEFAULT_EMBEDDING_PROVIDER).lower()
 
 # ── OpenAI ────────────────────────────────────────────────────────────────
 OPENAI_API_KEY         = os.getenv("OPENAI_API_KEY", "")
@@ -72,6 +74,13 @@ def validate() -> bool:
         missing.append("OPENROUTER_API_KEY")
     # Ollama: không cần API key
 
+    if EMBEDDING_PROVIDER == "openai" and not OPENAI_API_KEY:
+        missing.append("OPENAI_API_KEY (embeddings)")
+    elif EMBEDDING_PROVIDER == "gemini" and not GOOGLE_API_KEY:
+        missing.append("GOOGLE_API_KEY (embeddings)")
+    elif EMBEDDING_PROVIDER not in ("openai", "gemini", "ollama", "local"):
+        missing.append("EMBEDDING_PROVIDER must be one of: openai, gemini, ollama, local")
+
     if missing:
         print("⚠️  Thiếu biến môi trường:")
         for m in missing:
@@ -79,7 +88,11 @@ def validate() -> bool:
         print("   Hãy kiểm tra file .env của bạn (xem .env.example để biết thêm).")
         return False
 
-    print(f"✅ Config OK  |  Provider: {PROVIDER.upper()}  |  Project: {LANGSMITH_PROJECT}")
+    print(
+        f"✅ Config OK  |  Provider: {PROVIDER.upper()}"
+        f"  |  Embeddings: {EMBEDDING_PROVIDER.upper()}"
+        f"  |  Project: {LANGSMITH_PROJECT}"
+    )
     return True
 
 

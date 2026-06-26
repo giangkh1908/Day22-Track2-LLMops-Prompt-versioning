@@ -1,19 +1,52 @@
 """
-Factory tạo LLM và Embeddings cho 5 providers: openai, gemini, anthropic, ollama, openrouter.
+Factory tạo LLM và Embeddings cho nhiều providers.
 
 Cách dùng:
     from utils.llm_factory import get_llm, get_embeddings
 
     llm        = get_llm()            # dùng PROVIDER từ .env
-    embeddings = get_embeddings()     # dùng PROVIDER từ .env
+    embeddings = get_embeddings()     # dùng EMBEDDING_PROVIDER từ .env
 
     llm_gemini = get_llm("gemini")    # chỉ định provider cụ thể
 """
 import sys
+import hashlib
+import math
+import re
 from pathlib import Path
+
+from langchain_core.embeddings import Embeddings
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
+
+
+class LocalHashEmbeddings(Embeddings):
+    """Embedding local đơn giản, đủ dùng cho lab khi chỉ có OpenRouter key."""
+
+    def __init__(self, dimensions: int = 512):
+        self.dimensions = dimensions
+
+    def _embed(self, text: str) -> list[float]:
+        vector = [0.0] * self.dimensions
+        tokens = re.findall(r"\b\w+\b", text.lower())
+
+        for token in tokens:
+            digest = hashlib.md5(token.encode("utf-8")).digest()
+            index = int.from_bytes(digest[:4], "big") % self.dimensions
+            sign = 1.0 if digest[4] % 2 == 0 else -1.0
+            vector[index] += sign
+
+        norm = math.sqrt(sum(value * value for value in vector))
+        if norm:
+            vector = [value / norm for value in vector]
+        return vector
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [self._embed(text) for text in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed(text)
 
 
 def get_llm(provider: str = None, temperature: float = 0.0):
@@ -91,21 +124,21 @@ def get_embeddings(provider: str = None):
     Trả về Embeddings instance tương ứng với provider được chọn.
 
     Lưu ý quan trọng:
+        - OpenRouter là chat provider; mặc định dùng local embeddings để không cần OpenAI key
         - Anthropic KHÔNG có Embeddings API → tự động fallback về OpenAI embeddings
-        - OpenRouter cũng dùng OpenAI embeddings (không có API embeddings riêng)
         - Ollama cần model embedding riêng (mặc định: nomic-embed-text)
           Cài đặt: ollama pull nomic-embed-text
 
     Args:
-        provider: "openai" | "gemini" | "anthropic" | "ollama" | "openrouter"
-                  Mặc định: đọc PROVIDER từ .env
+        provider: "openai" | "gemini" | "ollama" | "local"
+                  Mặc định: đọc EMBEDDING_PROVIDER từ .env
 
     Returns:
         Embeddings instance sẵn sàng sử dụng
     """
-    provider = (provider or config.PROVIDER).lower()
+    provider = (provider or config.EMBEDDING_PROVIDER).lower()
 
-    if provider in ("openai", "openrouter"):
+    if provider == "openai":
         from langchain_openai import OpenAIEmbeddings
         kwargs = {
             "model": config.OPENAI_EMBEDDING_MODEL,
@@ -138,8 +171,12 @@ def get_embeddings(provider: str = None):
             base_url=config.OLLAMA_BASE_URL,
         )
 
+    elif provider == "local":
+        print("ℹ️  Đang dùng local hash embeddings cho FAISS (không cần API key).")
+        return LocalHashEmbeddings()
+
     else:
         raise ValueError(
-            f"Provider không hợp lệ: '{provider}'. "
-            "Chọn một trong: openai, gemini, anthropic, ollama, openrouter"
+            f"Embedding provider không hợp lệ: '{provider}'. "
+            "Chọn một trong: openai, gemini, ollama, local"
         )
